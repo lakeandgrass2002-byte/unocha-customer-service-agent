@@ -1,0 +1,12 @@
+﻿topic,content,source_status
+brand_name,烏弄 UNOCHA 原茶,official_brand_name
+brand_positioning,官方網站介紹其台灣原茶系列強調單一茶種與製程、不混茶。,official_website
+menu_source,官方飲品菜單：https://unocha.com.tw/drinks.php,official_website
+regional_pricing,官方公告指出部分品項供應與售價依地區調整；請以實際門市菜單或點餐系統為準。,official_announcement
+pricing_region,本作業的初始價格資料以南部地區公開菜單作為參考，不代表每間門市即時價格。,project_assumption
+opening_hours,尚未設定特定門市；請向實際門市確認營業時間。,not_confirmed
+address,尚未設定特定門市；請先選定門市後再補入地址。,not_confirmed
+payment_methods,尚未確認特定門市的付款方式，請向門市確認。,not_confirmed
+delivery_and_pickup,外送、外送平台與自取方式可能因門市而異，請向實際門市確認。,not_confirmed
+customization,甜度、冰量與配料調整方式請以該飲品及門市提供的選項為準。,verify_per_item_and_store
+complaints,若資料無法回答、涉及客訴或需要人工確認，客服應建議聯繫實際門市；本作業的轉人工工具僅為示範。,project_rule
