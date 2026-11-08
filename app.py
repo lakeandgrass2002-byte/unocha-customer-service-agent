@@ -10,6 +10,7 @@ from typing import Any
 import gradio as gr
 from dotenv import load_dotenv
 
+from rag import initialize_rag, search_knowledge
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -39,10 +40,23 @@ Never invent a store address, opening hours, delivery policy, payment method, st
 Scope: Answer only questions about UNOCHA drinks, menu, ordering calculations, and store service.
 Politely refuse unrelated requests and redirect to the shop.
 Routing:
-- Store policies / hours / address / payment / delivery -> get_shop_info.
+- Store information, hours, address, payment, delivery -> get_shop_info.
 - Menu, price, size, category, availability -> search_drinks.
 - Order total -> calculate_order_total; never calculate the bill mentally.
-- Complaint, special case, or missing information -> transfer_to_human.
+- Complaints, foreign objects, food safety, refunds, exchanges,
+  promotions, discounts, and customer-service rules
+  -> search_customer_service_knowledge.
+- For serious complaints, food safety issues, or requests for human assistance,
+  also use transfer_to_human.
+
+RAG rules:
+- Always retrieve relevant knowledge before answering customer-service policy questions.
+- The retrieved knowledge base contains simulated educational policies,
+  not official UNOCHA policies.
+- Never present simulated policies as official UNOCHA rules.
+- If retrieved information is insufficient or irrelevant, clearly say
+  that the demo knowledge base does not contain enough information.
+- Do not invent refund decisions, compensation, discounts, or official policies.
 Language: Reply in the customer's language, usually Traditional Chinese. Be concise (three sentences or less).
 Pricing: The menu data contains regional reference prices, not guaranteed live prices for any specific branch.
 Always disclose that actual prices and availability must be confirmed with the selected store when relevant.
@@ -332,13 +346,71 @@ def transfer_to_human(reason: str) -> dict[str, Any]:
         "message": "Demo handover recorded. No real store employee has been contacted; please contact the selected branch directly."
     }
 
+
+def search_customer_service_knowledge(query: str) -> dict[str, Any]:
+    """Search the RAG knowledge base for customer-service rules."""
+
+    results = search_knowledge(
+        query=query,
+        model=RAG_MODEL,
+        collection=RAG_COLLECTION,
+        top_k=3
+    )
+
+    if not results:
+        return {
+            "found": False,
+            "message": "知識庫沒有找到相關資料，請勿自行編造答案。"
+        }
+
+    return {
+        "found": True,
+        "count": len(results),
+        "results": [
+            {
+                "content": item["content"],
+                "source": item["metadata"]["source"],
+                "distance": item["distance"]
+            }
+            for item in results
+        ],
+        "instruction": (
+            "請只根據檢索到的內容回答。"
+            "如果內容不足以回答問題，請明確告知資料不足，"
+            "不要自行編造政策。"
+        )
+    }
+
 TOOL_DECLARATIONS = [
+        {
+        "name": "search_customer_service_knowledge",
+        "description": (
+            "Search the customer-service knowledge base for "
+            "complaint handling, food safety, foreign objects, "
+            "refunds, exchanges, promotions, discounts, and "
+            "customer-service rules. Always use this tool "
+            "before answering questions about these topics. "
+            "The retrieved policies are simulated educational "
+            "examples, not official UNOCHA policies."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The customer's question or policy topic."
+                }
+            },
+            "required": ["query"]
+        }
+    },
+
     {
         "name": "get_shop_info",
         "description": "Look up a store information topic. Use this for hours, address, payment, delivery, pickup, store policies, or menu source. Never guess if not found.",
         "parameters": {"type": "object", "properties": {"topic": {"type": "string", "description": "The exact topic key, e.g. opening_hours, address, payment_methods, delivery_and_pickup, menu_source"}}, "required": ["topic"]}
     },
-        
+
     {
         "name": "search_drinks",
         "description": (
@@ -400,6 +472,7 @@ TOOL_MAP = {
     "search_drinks": search_drinks,
     "calculate_order_total": calculate_order_total,
     "transfer_to_human": transfer_to_human,
+    "search_customer_service_knowledge": search_customer_service_knowledge,
 }
 
 
@@ -496,6 +569,26 @@ def run_agent(message, history):
     """執行 iAI Agent 工具呼叫循環，最多呼叫模型 MAX_MODEL_STEPS 次。"""
     trace = []
 
+    # 判斷是否屬於需要人工協助的問題
+    handover_keywords = [
+        "異物",
+        "食品安全",
+        "食安",
+        "投訴",
+        "客訴",
+        "飲料有問題",
+        "真人",
+        "人工客服"
+    ]
+
+    requires_handover = any(
+        keyword in message for keyword in handover_keywords
+    )
+
+    # 記錄本次是否已經執行過相關工具
+    rag_was_called = False
+    handover_was_called = False
+
     try:
         messages = _to_iai_history(history, message)
         tools = _to_iai_tools()
@@ -506,8 +599,33 @@ def run_agent(message, history):
 
             if not tool_calls:
                 answer = (model_message.get("content") or "").strip()
+
                 if not answer:
                     answer = "目前沒有可用的文字回覆，請聯繫門市確認。"
+
+                # 如果已經查詢 RAG，且問題需要人工協助，
+                # 但模型沒有自行呼叫轉交工具，則由程式自動補上。
+                if (
+                    rag_was_called
+                    and requires_handover
+                    and not handover_was_called
+                ):
+                    reason = f"客戶反映客服或食品安全問題：{message.strip()[:300]}"
+
+                    handover_result = transfer_to_human(reason)
+                    handover_was_called = True
+
+                    trace.append(
+                        f"**Step {step} — `transfer_to_human` (Automatic)**\n\n"
+                        f"- Arguments: `{json.dumps({'reason': reason}, ensure_ascii=False)}`\n"
+                        f"- Result: `{json.dumps(handover_result, ensure_ascii=False)}`"
+                    )
+
+                    answer += (
+                        "\n\n另外，已建立本次客訴的模擬人工轉交紀錄。"
+                        "這不代表已實際通知門市，請聯繫購買門市進一步處理。"
+                    )
+
                 return answer, "\n\n".join(trace) or "本次未呼叫工具。"
 
             # 保留模型原始工具呼叫訊息，讓下一輪能正確銜接
@@ -518,6 +636,13 @@ def run_agent(message, history):
                 function = call.get("function", {})
                 name = function.get("name", "")
                 raw_args = function.get("arguments", "{}")
+
+                # 記錄 RAG 與人工轉交工具的執行情況
+                if name == "search_customer_service_knowledge":
+                    rag_was_called = True
+
+                if name == "transfer_to_human":
+                    handover_was_called = True
 
                 try:
                     args = (
@@ -600,11 +725,11 @@ def respond(message, history):
     ]
     return history, "", trace
 
+# 建立原本的 SQLite 資料庫
 build_database()
 
-
-
-build_database()
+# 初始化 RAG 知識庫
+RAG_MODEL, RAG_COLLECTION = initialize_rag()
 
 with gr.Blocks(title="烏弄 UNOCHA AI 客服 Agent") as demo:
     gr.Markdown(

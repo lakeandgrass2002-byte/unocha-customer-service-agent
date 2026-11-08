@@ -1,9 +1,40 @@
+# API 金鑰與環境設定
 .env
-*.db
-__pycache__/
-venv/
+
+# Python 虛擬環境
 .venv/
+venv/
+env/
+
+# Python 暫存檔案
+__pycache__/
+*.py[cod]
+*.pyo
+
+# SQLite 資料庫
+*.db
+*.sqlite
+*.sqlite3
+
+# RAG 向量資料庫
+vector_db/
+
+# 模型與運算快取
+.cache/
+cache/
+
+# 系統產生檔案
+.DS_Store
+Thumbs.db
+
+# 編輯器設定
+.vscode/
+.idea/
+
+# 日誌檔案
+*.log
+
+# 前端與建置產物
 node_modules/
 build/
 dist/
-*.pyc
